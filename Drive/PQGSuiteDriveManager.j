@@ -22,7 +22,13 @@ PQGSuiteDriveMimeTypeProperty      = @"mimeType";
 
 @protocol PQGSuiteDriveManagerDelegate <CPObject>
 
-    - (void)driveManager: (PQGSuiteDriveManager)manager didReceiveFiles:(CPArray)files forDirectory:(CPString)directoryID;
+@optional
+    - (void)driveManager: (PQGSuiteDriveManager)manager didReceiveFiles:(CPArray)files forDriveItem:(PQGSuiteDriveItem)driveItem;
+    - (void)driveManager: (PQGSuiteDriveManager)manager didReceiveAttributesForDriveItem:(PQGSuiteDriveItem)driveItem;
+
+    - (void)driveManager: (PQGSuiteDriveManager)manager didDownloadDataForDriveItem:(PQGSuiteDriveItem)driveItem data:(CPData)data;
+
+    - (void)driveManager: (PQGSuiteDriveManager)manager didUploadDataForDriveItem:(PQGSuiteDriveItem)driveItem;
 
 @end
 
@@ -38,10 +44,9 @@ PQGSuiteDriveMimeTypeProperty      = @"mimeType";
     return self;   
 }
 
-+ (PQGSuiteDriveManager)driveManagerWithAuthorization:(id)authorization
++ (PQGSuiteDriveManager)driveManager
 {
     var driveManager = [[PQGSuiteDriveManager alloc] init];
-     driveManager._auth = authorization;
     return driveManager;
 }
 
@@ -64,12 +69,17 @@ PQGSuiteDriveMimeTypeProperty      = @"mimeType";
 
 - (void)contentsOfHomeDirectory
 {
-    [self contentsOfDirectoryWithID: @"root" includingPropertiesForKeys: [PQGSuiteDriveManager DefaultProperties]];    
+    [self contentsOfDirectoryForDriveItem: [PQGSuiteDriveItem rootItem] includingPropertiesForKeys: [PQGSuiteDriveManager DefaultProperties]];    
 }
 
-- (void)contentsOfDirectoryWithID:(CPString)directoryID includingPropertiesForKeys:(CPArray)keys
+- (void)contentsOfDirectoryForDriveItem: (PQGSuiteDriveItem)driveItem
 {
-    var query = [CPString stringWithFormat: @"'%@' in parents", directoryID];
+    [self contentsOfDirectoryForDriveItem: driveItem includingPropertiesForKeys: [PQGSuiteDriveManager DefaultProperties]];    
+}
+
+- (void)contentsOfDirectoryForDriveItem:(PQGSuiteDriveItem)driveItem includingPropertiesForKeys:(CPArray)keys
+{
+    var query = [CPString stringWithFormat: @"'%@' in parents and trashed = false", [driveItem ID]];
     var fields = [CPString stringWithFormat: @"nextPageToken, files(%@)", [keys componentsJoinedByString: @", "]];
     gapi.client.drive.files.list({
         'q': query,
@@ -84,9 +94,55 @@ PQGSuiteDriveMimeTypeProperty      = @"mimeType";
                     [contents addObject: item];
                 }
             }
-            [_delegate driveManager: self didReceiveFiles: contents forDirectory: directoryID];
+            if ([_delegate respondsToSelector:@selector(driveManager:didReceiveFiles:forDriveItem:)]) {
+                [_delegate driveManager: self didReceiveFiles: contents forDriveItem: driveItem];
+            }
         }
     );
+}
+
+- (void)attributesOfDriveItemWithID:(CPString)driveItemID
+{
+    [self attributesOfDriveItemWithID:driveItemID includingPropertiesForKeys: [PQGSuiteDriveManager DefaultProperties]];
+}
+
+- (void)attributesOfDriveItemWithID:(CPString)driveItemID includingPropertiesForKeys:(CPArray)keys
+{
+    var request = gapi.client.drive.files.get({fileId : driveItemID})
+    request.execute(function(resp) {
+        var item = [[PQGSuiteDriveItem alloc] initWithFile: resp];
+        if ([_delegate respondsToSelector:@selector(driveManager:didReceiveAttributesForDriveItem:)]) {
+            [_delegate driveManager: self didReceiveAttributesForDriveItem: item];
+        }
+    });
+}
+
+- (void)downloadDataForDriveItem:(PQGSuiteDriveItem)item
+{
+    gapi.client.drive.files.get({fileId : [item ID],
+                                                alt : 'media'}).then(function(response) {
+        var data = [CPData dataWithBytes: response.body];
+        if ([_delegate respondsToSelector:@selector(driveManager:didDownloadDataForDriveItem:data:)]) {
+            [_delegate driveManager: self didDownloadDataForDriveItem: item data: data];
+        }
+    });
+}
+
+- (void)uploadData:(CPData)data forDriveItem:(PQGSuiteDriveItem)item
+{
+    gapi.client.request({
+        path: '/upload/drive/v3/files/' + [item ID],
+        method: 'PATCH',
+        params: {
+            uploadType: 'media',
+            mimeType: [item mimeType]
+        },
+        body: [data bytes]
+    }).execute(function(response) {
+        if ([_delegate respondsToSelector:@selector(driveManager:didUploadDataForDriveItem:)]) {
+            [_delegate driveManager: self didUploadDataForDriveItem: item];
+        }
+    });
 }
 
 @end

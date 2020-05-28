@@ -38,10 +38,8 @@ var gSuiteClient = nil;
 
 + (PQGSuiteClient)sharedGSuiteClient
 {
-    CPLog(@"sharedGSuiteClient");
-    gapi.load('client:auth2', start);
-    if (gSuiteClient === nil) {
-        // 1. Load the JavaScript client library.
+    if (gSuiteClient == nil) {
+        gapi.load('client:auth2', start);
         gSuiteClient = [[PQGSuiteClient alloc] init];
     }
     
@@ -63,8 +61,9 @@ function start() {
     gapi.client.load('drive', 'v3', function () {
         var clientID = [[CPBundle mainBundle] objectForInfoDictionaryKey: PQ_GSUITE_CLIENTID];
     
-        if (clientID === nil) {
-            CPLog.error(@"client ID not specified in Info.plist");
+        if (clientID == nil) {
+            [CPException raise:CPInternalInconsistencyException
+                        reason:@"PQGSuiteClientID required to be set in Info.plist"];
         }
         
         gapi.client.init({
@@ -123,6 +122,15 @@ function updateSigninStatus(isSignedIn)
         return profile.getName();
     }
     return nil;
+}
+
+- (CPString)firstName
+{
+    if (_isSignedIn) {
+        var profile = _auth2.currentUser.get().getBasicProfile();
+        return profile.getGivenName();
+    }
+    return nil;    
 }
 
 - (CPString)getEmail
